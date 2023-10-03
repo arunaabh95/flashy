@@ -16,6 +16,6 @@ You may also see any lint errors in the console.
 
 ## Demo
 
-(https://github.com/arunaabh95/flashy/blob/master/public/sports-ca.png)
+![Demo](https://github.com/arunaabh95/flashy/blob/master/public/sports-ca.png)
 
 #### Note: I am unable to render the results in UI but the console shows the valid output
