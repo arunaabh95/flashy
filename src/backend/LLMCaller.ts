@@ -31,11 +31,11 @@ export default class LLMCaller {
     ): Promise<any> {
         try {
             const payload = {
-                prompt: {...prompt},
+                prompt,
                 temperature,
                 candidate_count: 1,
               };
-            const response = await fetch(`${this.baseUrl}/v1beta2/models/chat-bison-001:generateMessage?key=${this.apiKey}`, {
+            const response = await fetch(`${this.baseUrl}/v1beta2/models/text-bison-001:generateText?key=${this.apiKey}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -44,7 +44,7 @@ export default class LLMCaller {
              });
         if(response.status === 200) {
             const result = await response.json();
-            return result.candidates[0].content;
+            return result.candidates[0].output;
           } else {
             const res = await response.json();
             return res.error.message;

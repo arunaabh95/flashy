@@ -71,9 +71,7 @@ export interface MessageProps {
    * represent the prompt's messages.
    */
   export interface PromptProps {
-    context?: string;
-    examples?: ExampleProps[];
-    messages: MessageProps[];
+    text: string
   }
   
   /**

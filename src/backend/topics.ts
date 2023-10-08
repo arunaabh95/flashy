@@ -12,7 +12,7 @@ export async function getTopicList(name: string, category: DeckCategory): Promis
     metaphorResult = await getMetaphorResult(prompt);
     console.log(metaphorResult);
     const urls: string[] = metaphorResult.map((result) => result.url);
-    const llmResult: string = await getLlmData(urls, prompt);
+    const llmResult: string = await getLlmData(urls, prompt, category);
     console.log(llmResult);
     const parsedResult: FlashcardResponse[] = parseLllmResult(llmResult, category);
     return parsedResult;
@@ -22,13 +22,13 @@ function getPromptByCategory(name: string, category: DeckCategory): string {
     let prompt: string = "";
     switch(category) {
         case DeckCategory.QNA:
-            prompt = `Get me question and answers on ${name}`;
+            prompt = `Get me flashcards for questions and answers on ${name}`;
             break;
         case DeckCategory.COLLECTION:
             prompt = `Get me a collection of flashcards on ${name}`;
             break;
         case DeckCategory.INSTRUCTION:
-            prompt = `I need step by step instructions to ${name}`;
+            prompt = `I need step-by-step instructions to ${name}`;
             break;
         case DeckCategory.OTHER:
             break;
@@ -42,27 +42,19 @@ async function getMetaphorResult(prompt: string): Promise<MetaphorResult[]> {
     return response.results;
 }
 
-async function getLlmData(urls: string[], prompt: string): Promise<any> {
+async function getLlmData(urls: string[], prompt: string, category: DeckCategory): Promise<any> {
     const llmCaller = new LLMCaller();
-    const bard1Context  = {
-        context:
-          `As a smart flaschard generator with extensive knowledge in flashcard making, your task is to create a deck of flashcards depending on user topic. 
-          Each flashcard has 3 components to it, a title, an image url that can be renderd, and a description. You need to give 10-15 flascards. 
-          Further there are 3 categories of flashcards as follows: 
-          1 Question answer based: These flash cards have question in their title, an image and answer as their description. 
-          2 Collection based: These can be collection of words, or other objects, the title is the object name, there is an image of the object, and the description has a couple of lines of the object.
-          3 Instruction based: These cards where you need to generate step by step instruciton, here the title is the step heading, then there is a visual representation of the step if possible, then in the description there needs to be details on how to carry out that step. 
-           If an relatable image is not available please send an empty string. Further you need to give proper https urls for images that can be rendered in img tag. 
-           The output format needs to be as follows: title1|img1|desc1~title2|img2|desc2..... Use urls given in the context to fetch data
-           Also there are set of urls that you need to use as knowledge base to generate these flash cards. The url are as follows:`,
-      };
-    bard1Context.context += "\n" + urls.map((url) => {
+    let bardPrompt  = 
+        `Generate output for different types of user queries by strictly following the template given in the examples. Also, take into consideration the category of the query to generate the response. The output should have proper separators, as shown in the example to parse the outpu.\n`;
+    bardPrompt = getLlmExample(bardPrompt);
+    bardPrompt = getLlmMessage(bardPrompt, prompt, category);
+    bardPrompt += "\nUse the following urls as your knowldege base:\n";
+    bardPrompt += urls.map((url) => {
         return encodeURIComponent(url) + "\n";
     });
-    const bardExample = getLlmExample();
-    const bardMessage = getLlmMessage(prompt);
+    console.log(bardPrompt);
     try {
-        const result = await llmCaller.sendPrompt({context: bard1Context.context, examples: bardExample, messages: [bardMessage]});
+        const result = await llmCaller.sendPrompt({text: bardPrompt});
         console.log(result);
         return result;
     } catch(error) {
@@ -92,69 +84,59 @@ function parseLllmResult(llmResult:string, category: DeckCategory): FlashcardRes
 }
 
 function parseCollections(llmResult: string) {
-    let result: FlashcardResponse[] = [];
-    const rows = llmResult.split("\n");
-    for (const line of rows) {
-        if(!line.includes("|"))continue;
-        const cardParts = line.split("|");
-        console.log(cardParts);
-        const title = cardParts[1];
-        const image = cardParts.length > 4 ? cardParts[2]: "";
-        const description = cardParts.length > 4 ?cardParts[3]: cardParts[2];
-        result.push({title, image, description})
-    }
-    console.log(result);
-    result.shift();
-    result.shift();
-    return result;
+    const pairs:string[] = llmResult.split('~'); // Split by '~' to separate title-description pairs
+
+    const result:FlashcardResponse[] = pairs.map((pair) => {
+    const [title, description] = pair.split('|'); // Split each pair by '|'
+    return {
+      title: title.trim(),
+      description: description.trim(),
+    };
+  });
+
+  return result;
 }
 
 function parseInstructions(llmResult: string) {
-    let result: FlashcardResponse[] = [];
-    const lines = llmResult.split('\n');
+    const titleDescriptionRegex = /\*\*(.*?)\*\*([\s\S]*?)(?=\*\*|\n*$)/g;
+  const matches = [...llmResult.matchAll(titleDescriptionRegex)];
 
-  let currentTitle = '';
-  let currentDescription = '';
-
-  for (const line of lines) {
-    const trimmedLine = line.trim();
-    if (trimmedLine.startsWith('**') && trimmedLine.endsWith('**')) {
-      // Found a title line
-      if (currentTitle && currentDescription) {
-        result.push({ title: currentTitle, description: currentDescription });
-      }
-      currentTitle = trimmedLine.substring(2, trimmedLine.length - 2).trim();
-      currentDescription = '';
-    } else if (currentTitle) {
-      // Add line to description
-      if (currentDescription) {
-        currentDescription += '\n';
-      }
-      currentDescription += trimmedLine;
-    }
-  }
-
-  // Add the last instruction
-  if (currentTitle && currentDescription) {
-    result.push({ title: currentTitle, image: "", description: currentDescription });
-  }
+  const result = matches.map((match) => {
+    const title = match[1].trim();
+    const description = match[2].trim();
+    return {
+      title,
+      description,
+    };
+  });
 
   return result;
 }
 
 function parseQna(llmResult: string) {
-    let result: FlashcardResponse[] = [];
-    const regex = /(\d+\.\s.*?)(?=\d+\.|\z)/gs;
+    const questionAnswerPairs = llmResult.split('~'); // Split by '~' to separate question-answer pairs
+    const result:FlashcardResponse[] = [];
 
-    let match;
+    questionAnswerPairs.forEach((pair) => {
+        const parts = pair.split('|'); // Split each pair by '|'
+        const questionPart = parts[0].trim(); // Get the question part
+        const answerPart = parts[1].trim(); // Get the answer part
 
-    while ((match = regex.exec(llmResult)) !== null) {
-        const [fullMatch, questionAndAnswer] = match;
-        const [question, answer] = questionAndAnswer.split('\nAnswer: ');
-    
-        result.push({ title: question.trim(), image: "", description: answer.trim() });
+        const questionMatch = questionPart.match(/^(Question|Q) (\d+)*: (.+)$/);
+        if (questionMatch) {
+            const questionText = questionMatch[2];
+
+        const answerMatch = answerPart.match(/^(Answer|a): (.+)$/);
+        if (answerMatch) {
+            const answerText = answerMatch[1];
+
+        result.push({
+          title: questionText,
+          description: answerText,
+        });
+      }
     }
+  });
 
-    console.log(result);
-    return result;
+  return result;
 }
